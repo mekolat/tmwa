@@ -283,25 +283,44 @@ namespace npc
     static
     Result<ScriptFunction> parse_script_function_head(io::LineSpan span, std::vector<Spanned<std::vector<Spanned<RString>>>>& bits)
     {
-        //  ScriptFunction:     function|script|Fun Name{code}
-        if (bits.size() != 3)
+        //  ScriptFunction:     function|script|Fun Name{code} (LEGACY)
+        if (bits.size() == 3)
         {
-            return Err(span.error_str("expect 3 |component|s"_s));
-        }
-        assert(bits[0].data.size() == 1);
-        assert(bits[0].data[0].data == "function"_s);
-        assert(bits[1].data.size() == 1);
-        assert(bits[1].data[0].data == "script"_s);
-        if (bits[2].data.size() != 1)
-        {
-            return Err(bits[2].span.error_str("in |component 3| expect 1 ,component,s"_s));
+            assert(bits[0].data.size() == 1);
+            assert(bits[0].data[0].data == "function"_s);
+            assert(bits[1].data.size() == 1);
+            assert(bits[1].data[0].data == "script"_s);
+            if (bits[2].data.size() != 1)
+            {
+                return Err(bits[2].span.error_str("in |component 3| expect 1 ,component,s"_s));
+            }
+
+            ScriptFunction script_function;
+            script_function.key1_span = bits[0].data[0].span;
+            TRY_EXTRACT(bits[2].data[0], script_function.name);
+            // also expect '{' and parse real script (in caller)
+            return Ok(std::move(script_function));
         }
 
-        ScriptFunction script_function;
-        script_function.key1_span = bits[0].data[0].span;
-        TRY_EXTRACT(bits[2].data[0], script_function.name);
-        // also expect '{' and parse real script (in caller)
-        return Ok(std::move(script_function));
+        //  ScriptFunction:     function|Fun Name{code} (NEW)
+        else if (bits.size() == 2)
+        {
+            assert(bits[0].data.size() == 1);
+            assert(bits[0].data[0].data == "function"_s);
+            if (bits[1].data.size() != 1)
+            {
+                return Err(bits[1].span.error_str("in |component 2| expect 1 ,component,s"_s));
+            }
+
+            ScriptFunction script_function;
+            script_function.key1_span = bits[0].data[0].span;
+            TRY_EXTRACT(bits[1].data[0], script_function.name);
+            // also expect '{' and parse real script (in caller)
+            return Ok(std::move(script_function));
+        }
+
+        else
+            return Err(span.error_str("expect 3 |component|s"_s));
     }
     static
     Result<ScriptNone> parse_script_none_head(io::LineSpan span, std::vector<Spanned<std::vector<Spanned<RString>>>>& bits)
@@ -579,6 +598,7 @@ namespace npc
         }
         if (bits.data[1].data.size() != 1)
             return Err(bits.data[1].span.error_str("Expected a single word in type position"_s));
+        Spanned<RString>& w1 = bits.data[0].data[0];
         Spanned<RString>& w2 = bits.data[1].data[0];
         if (w2.data == "warp"_s)
         {
@@ -604,7 +624,7 @@ namespace npc
             rv.span = bits.span;
             return Some(Ok(std::move(rv)));
         }
-        else if (w2.data == "script"_s)
+        else if (w2.data == "script"_s || (w1.data == "function"_s && bits.data[0].data.size() == 1))
         {
             TopLevel rv = TRY_MOVE(parse_script_any(bits.span, bits.data, in));
             rv.span = bits.span;
