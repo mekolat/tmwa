@@ -503,6 +503,59 @@ void builtin_heal(ScriptState *st)
  *------------------------------------------
  */
 static
+void builtin_injure(ScriptState *st)
+{
+    dumb_ptr<block_list> caster = map_id2bl(st->rid);
+    dumb_ptr<block_list> target = map_id2bl(wrap<BlockId>(conv_num(st, &AARG(0))));
+    int damage_caused = conv_num(st, &AARG(1));
+    int mp_damage = conv_num(st, &AARG(2));
+    int target_hp = battle_get_hp(target);
+    int mdef = battle_get_mdef(target);
+
+    if (target->bl_type == BL::PC
+        && !target->bl_m->flag.get(MapFlag::PVP)
+        && (caster->bl_type == BL::PC)
+        && ((caster->is_player()->state.pvpchannel > 1) && (target->is_player()->state.pvpchannel != caster->is_player()->state.pvpchannel)))
+        return;               /* Cannot damage other players outside of pvp */
+
+    if (target != caster)
+    {
+        /* Not protected against own spells */
+        damage_caused = (damage_caused * (100 - mdef)) / 100;
+        mp_damage = (mp_damage * (100 - mdef)) / 100;
+    }
+
+    damage_caused = (damage_caused > target_hp) ? target_hp : damage_caused;
+
+    if (damage_caused < 0)
+        damage_caused = 0;
+
+    // display damage first, because dealing damage may deallocate the target.
+    clif_damage(caster, target,
+            gettick(), interval_t::zero(), interval_t::zero(),
+            damage_caused, 0, DamageType::NORMAL);
+
+    if (caster->bl_type == BL::PC)
+    {
+        dumb_ptr<map_session_data> caster_pc = caster->is_player();
+        if (target->bl_type == BL::MOB)
+        {
+            dumb_ptr<mob_data> mob = target->is_mob();
+            dumb_ptr<npc_data> nd = map_id_is_npc(st->oid);
+            MAP_LOG_PC(caster_pc, "SPELLDMG MOB%d %d FOR %d BY %s"_fmt,
+                    mob->bl_id, mob->mob_class, damage_caused, nd->name);
+        }
+    }
+    battle_damage(caster, target, damage_caused, mp_damage);
+
+    return;
+}
+
+/*==========================================
+ *
+ *------------------------------------------
+ */
+static
 void builtin_input(ScriptState *st)
 {
     dumb_ptr<map_session_data> sd = nullptr;
@@ -1449,6 +1502,31 @@ void builtin_getskilllv(ScriptState *st)
 {
     SkillID id = SkillID(conv_num(st, &AARG(0)));
     push_int<ScriptDataInt>(st->stack, pc_checkskill(script_rid2sd(st), id));
+}
+
+/*==========================================
+ *
+ *------------------------------------------
+ */
+static
+void builtin_overrideattack(ScriptState *st)
+{
+    dumb_ptr<map_session_data> sd = script_rid2sd(st);
+    int charges = conv_num(st, &AARG(0));
+    interval_t attack_delay = static_cast<interval_t>(conv_num(st, &AARG(1)));
+    int attack_range = conv_num(st, &AARG(2));
+    StatusChange icon = StatusChange(conv_num(st, &AARG(3)));
+    ItemNameId look = wrap<ItemNameId>(static_cast<uint16_t>(conv_num(st, &AARG(4))));
+    ZString event_ = ZString(conv_str(st, &AARG(5)));
+
+    NpcEvent event;
+    extract(event_, &event);
+
+    sd->attack_spell_override = st->oid;
+    sd->attack_spell_charges = charges;
+    sd->magic_attack = event;
+    pc_set_weapon_icon(sd, charges, icon, look);
+    pc_set_attack_info(sd, attack_delay, attack_range);
 }
 
 /*==========================================
@@ -3505,6 +3583,7 @@ BuiltinFunction builtin_functions[] =
     BUILTIN(warp, "Mxy"_s, '\0'),
     BUILTIN(areawarp, "MxyxyMxy"_s, '\0'),
     BUILTIN(heal, "ii?"_s, '\0'),
+    BUILTIN(injure, "iii"_s, '\0'),
     BUILTIN(input, "N"_s, '\0'),
     BUILTIN(if, "iF*"_s, '\0'),
     BUILTIN(elif, "iF*"_s, '\0'),
@@ -3530,6 +3609,7 @@ BuiltinFunction builtin_functions[] =
     BUILTIN(skill, "ii?"_s, '\0'),
     BUILTIN(setskill, "ii"_s, '\0'),
     BUILTIN(getskilllv, "i"_s, 'i'),
+    BUILTIN(overrideattack, "iiiiiE"_s, '\0'),
     BUILTIN(getgmlevel, ""_s, 'i'),
     BUILTIN(end, ""_s, '\0'),
     BUILTIN(getopt2, ""_s, 'i'),
