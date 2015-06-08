@@ -479,6 +479,9 @@ struct mob_data : block_list
     // [Fate] mob-specific stats
     earray<unsigned short, mob_stat, mob_stat::LAST> stats;
     short size;
+    // Npc Runscripts
+    std::list<RString> eventqueuel;
+    Array<Timer, MAX_EVENTTIMER> eventtimer;
 };
 
 struct BlockLists

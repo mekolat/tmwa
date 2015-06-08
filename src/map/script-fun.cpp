@@ -3114,31 +3114,56 @@ void builtin_getsavepoint(ScriptState *st)
 static
 void builtin_areatimer_sub(dumb_ptr<block_list> bl, interval_t tick, NpcEvent event)
 {
-    pc_addeventtimer(bl->is_player(), tick, event);
+    if (bl->bl_type == BL::PC)
+    {
+        dumb_ptr<map_session_data> sd = map_id_is_player(bl->bl_id);
+        pc_addeventtimer(sd, tick, event);
+    }
+    else
+    {
+        npc_addeventtimer(bl, tick, event);
+    }
 }
 
 static
 void builtin_areatimer(ScriptState *st)
 {
-    int x0, y0, x1, y1;
+    int x0, y0, x1, y1, bl_num;
 
-    MapName mapname = stringish<MapName>(ZString(conv_str(st, &AARG(0))));
-    x0 = conv_num(st, &AARG(1));
-    y0 = conv_num(st, &AARG(2));
-    x1 = conv_num(st, &AARG(3));
-    y1 = conv_num(st, &AARG(4));
-    interval_t tick = static_cast<interval_t>(conv_num(st, &AARG(5)));
-    ZString event_ = ZString(conv_str(st, &AARG(6)));
+    bl_num = conv_num(st, &AARG(0));
+    MapName mapname = stringish<MapName>(ZString(conv_str(st, &AARG(1))));
+    x0 = conv_num(st, &AARG(2));
+    y0 = conv_num(st, &AARG(3));
+    x1 = conv_num(st, &AARG(4));
+    y1 = conv_num(st, &AARG(5));
+    interval_t tick = static_cast<interval_t>(conv_num(st, &AARG(6)));
+    ZString event_ = conv_str(st, &AARG(7));
+    BL block_type;
     NpcEvent event;
     extract(event_, &event);
 
     P<map_local> m = TRY_UNWRAP(map_mapname2mapid(mapname), return);
 
+    switch (bl_num)
+    {
+        case 0:
+            block_type = BL::PC;
+            break;
+        case 1:
+            block_type = BL::NPC;
+            break;
+        case 2:
+            block_type = BL::MOB;
+            break;
+        default:
+            return;
+    }
+
     map_foreachinarea(std::bind(builtin_areatimer_sub, ph::_1, tick, event),
             m,
             x0, y0,
             x1, y1,
-            BL::PC);
+            block_type);
 }
 
 /*==========================================
@@ -3493,7 +3518,7 @@ BuiltinFunction builtin_functions[] =
     BUILTIN(getmask, ""_s, 'i'),
     BUILTIN(getlook, "i"_s, 'i'),
     BUILTIN(getsavepoint, "i"_s, '.'),
-    BUILTIN(areatimer, "MxyxytE"_s, '\0'),
+    BUILTIN(areatimer, "MxyxytEi"_s, '\0'),
     BUILTIN(isin, "Mxyxy"_s, 'i'),
     BUILTIN(iscollision, "Mxy"_s, 'i'),
     BUILTIN(shop, "s"_s, '\0'),
