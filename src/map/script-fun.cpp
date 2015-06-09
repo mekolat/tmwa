@@ -47,7 +47,6 @@
 #include "globals.hpp"
 #include "intif.hpp"
 #include "itemdb.hpp"
-#include "magic-interpreter-base.hpp"
 #include "map.hpp"
 #include "mob.hpp"
 #include "npc.hpp"
@@ -2766,18 +2765,6 @@ void builtin_getitemlink(ScriptState *st)
 }
 
 static
-void builtin_getspellinvocation(ScriptState *st)
-{
-    RString name = conv_str(st, &AARG(0));
-
-    AString invocation = magic::magic_find_invocation(name);
-    if (!invocation)
-        invocation = "..."_s;
-
-    push_str<ScriptDataStr>(st->stack, invocation);
-}
-
-static
 void builtin_getpartnerid2(ScriptState *st)
 {
     dumb_ptr<map_session_data> sd = script_rid2sd(st);
@@ -3788,7 +3775,6 @@ BuiltinFunction builtin_functions[] =
     BUILTIN(marriage, "P"_s, 'i'),
     BUILTIN(divorce, ""_s, 'i'),
     BUILTIN(getitemlink, "I"_s, 's'),
-    BUILTIN(getspellinvocation, "s"_s, 's'),
     BUILTIN(getpartnerid2, ""_s, 'i'),
     BUILTIN(explode, "Nss"_s, '\0'),
     BUILTIN(getinventorylist, ""_s, '\0'),

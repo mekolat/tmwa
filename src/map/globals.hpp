@@ -49,17 +49,6 @@ namespace tmwa
         extern std::map<MapName, RString> resnametable;
         extern Map<ItemNameId, item_data> item_db;
         extern Map<QuestId, quest_data> quest_db;
-        namespace magic
-        {
-            // Global magic conf
-            extern magic_conf_t magic_conf;
-            extern env_t magic_default_env;
-            namespace magic_v2
-            {
-                extern std::map<RString, proc_t> procs;
-                extern std::map<RString, val_t> const_defm;
-            } // namespace magic_v2
-        } // namespace magic
         extern DMap<BlockId, dumb_ptr<block_list>> id_db;
         extern UPMap<MapName, map_abstract> maps_db;
         extern DMap<CharName, dumb_ptr<map_session_data>> nick_db;
