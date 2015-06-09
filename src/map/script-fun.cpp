@@ -70,6 +70,13 @@ namespace map
 #define AARG(n) (st->stack->stack_datav[st->start + 2 + (n)])
 #define HARG(n) (st->end > st->start + 2 + (n))
 
+enum class MonsterAttitude
+{
+    HOSTILE     = 0,
+    FRIENDLY    = 1,
+    SERVANT     = 2,
+    FROZEN      = 3,
+};
 //
 // 埋め込み関数
 //
@@ -1747,6 +1754,72 @@ void builtin_getexp(ScriptState *st)
     if (sd)
         pc_gainexp_reason(sd, base, job, PC_GAINEXP_REASON::SCRIPT);
 
+}
+
+static
+void builtin_summon(ScriptState *st)
+{
+    NpcEvent event;
+    MapName map = stringish<MapName>(ZString(conv_str(st, &AARG(0))));
+    int x = conv_num(st, &AARG(1));
+    int y = conv_num(st, &AARG(2));
+    dumb_ptr<block_list> owner_e = map_id2bl(wrap<BlockId>(conv_num(st, &AARG(3))));
+    dumb_ptr<map_session_data> owner = nullptr;
+    Species monster_id = wrap<Species>(conv_num(st, &AARG(4)));
+    MonsterAttitude monster_attitude = static_cast<MonsterAttitude>(conv_num(st, &AARG(5)));
+    interval_t lifespan = static_cast<interval_t>(conv_num(st, &AARG(6)));
+    if (HARG(7))
+        extract(ZString(conv_str(st, &AARG(7))), &event);
+
+    if (monster_attitude == MonsterAttitude::SERVANT
+        && owner_e->bl_type == BL::PC)
+        owner = owner_e->is_player(); // XXX in the future this should also work with mobs as owner
+
+    BlockId mob_id = mob_once_spawn(owner, map, x, y, MobName(), monster_id, 1, event);
+    dumb_ptr<mob_data> mob = map_id_is_mob(mob_id);
+
+    if (mob)
+    {
+        mob->mode = get_mob_db(monster_id).mode;
+
+        switch (monster_attitude)
+        {
+            case MonsterAttitude::SERVANT:
+                mob->state.special_mob_ai = 1;
+                mob->mode |= MobMode::AGGRESSIVE;
+                break;
+
+            case MonsterAttitude::FRIENDLY:
+                mob->mode = MobMode::CAN_ATTACK | (mob->mode & MobMode::CAN_MOVE);
+                break;
+
+            case MonsterAttitude::HOSTILE:
+                mob->mode = MobMode::CAN_ATTACK | MobMode::AGGRESSIVE | (mob->mode & MobMode::CAN_MOVE);
+                if (owner)
+                {
+                    mob->target_id = owner->bl_id;
+                    mob->attacked_id = owner->bl_id;
+                }
+                break;
+
+            case MonsterAttitude::FROZEN:
+                mob->mode = MobMode::ZERO;
+                break;
+        }
+
+        mob->mode |=
+            MobMode::SUMMONED | MobMode::TURNS_AGAINST_BAD_MASTER;
+
+        mob->deletetimer = Timer(gettick() + lifespan,
+                std::bind(mob_timer_delete, ph::_1, ph::_2,
+                    mob_id));
+
+        if (owner)
+        {
+            mob->master_id = owner->bl_id;
+            mob->master_dist = 6;
+        }
+    }
 }
 
 /*==========================================
@@ -3643,6 +3716,7 @@ BuiltinFunction builtin_functions[] =
     BUILTIN(gettime, "i"_s, 'i'),
     BUILTIN(openstorage, ""_s, '\0'),
     BUILTIN(getexp, "ii"_s, '\0'),
+    BUILTIN(summon, "Mxysmii?"_s, '\0'),
     BUILTIN(monster, "Mxysmi?"_s, '\0'),
     BUILTIN(areamonster, "Mxyxysmi?"_s, '\0'),
     BUILTIN(killmonster, "ME"_s, '\0'),
