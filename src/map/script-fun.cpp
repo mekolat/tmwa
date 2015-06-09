@@ -503,6 +503,28 @@ void builtin_heal(ScriptState *st)
  *------------------------------------------
  */
 static
+void builtin_elttype(ScriptState *st)
+{
+    int element_type = static_cast<int>(battle_get_element(map_id2bl(wrap<BlockId>(conv_num(st, &AARG(0))))).element);
+    push_int<ScriptDataInt>(st->stack, element_type);
+}
+
+/*==========================================
+ *
+ *------------------------------------------
+ */
+static
+void builtin_eltlvl(ScriptState *st)
+{
+    int element_lvl = static_cast<int>(battle_get_element(map_id2bl(wrap<BlockId>(conv_num(st, &AARG(0))))).level);
+    push_int<ScriptDataInt>(st->stack, element_lvl);
+}
+
+/*==========================================
+ *
+ *------------------------------------------
+ */
+static
 void builtin_injure(ScriptState *st)
 {
     dumb_ptr<block_list> caster = map_id2bl(st->rid);
@@ -3583,6 +3605,8 @@ BuiltinFunction builtin_functions[] =
     BUILTIN(warp, "Mxy"_s, '\0'),
     BUILTIN(areawarp, "MxyxyMxy"_s, '\0'),
     BUILTIN(heal, "ii?"_s, '\0'),
+    BUILTIN(elttype, "i"_s, 'i'),
+    BUILTIN(eltlvl, "i"_s, 'i'),
     BUILTIN(injure, "iii"_s, '\0'),
     BUILTIN(input, "N"_s, '\0'),
     BUILTIN(if, "iF*"_s, '\0'),
