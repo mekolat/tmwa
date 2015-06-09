@@ -3291,6 +3291,18 @@ void builtin_npctalk(ScriptState *st)
 }
 
 /*==========================================
+  * casttime
+  *------------------------------------------
+  */
+static
+void builtin_casttime(ScriptState *st)
+{
+    dumb_ptr<map_session_data> sd = script_rid2sd(st);
+    interval_t tick = static_cast<interval_t>(conv_num(st, &AARG(0)));
+    sd->cast_tick = gettick() + tick;
+}
+
+/*==========================================
   * getlook char info. getlook(arg)
   *------------------------------------------
   */
@@ -3777,6 +3789,7 @@ BuiltinFunction builtin_functions[] =
     BUILTIN(npcareawarp, "xyxyis"_s, '\0'),
     BUILTIN(message, "Ps"_s, '\0'),
     BUILTIN(npctalk, "ss?"_s, '\0'),
+    BUILTIN(casttime, "i"_s, '\0'),
     BUILTIN(title, "s"_s, '\0'),
     BUILTIN(music, "s"_s, '\0'),
     BUILTIN(mapmask, "i?"_s, '\0'),
