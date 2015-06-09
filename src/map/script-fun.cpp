@@ -640,6 +640,61 @@ void builtin_elif (ScriptState *st)
 }
 
 /*==========================================
+ *
+ *------------------------------------------
+ */
+static
+void builtin_foreach_sub(dumb_ptr<block_list> bl, NpcEvent event, BlockId caster)
+{
+    // call_spell_event_script
+    argrec_t arg[1] =
+    {
+        {"@target_id"_s, static_cast<int32_t>(unwrap<BlockId>(bl->bl_id))},
+    };
+    npc_event_do_l(event, caster, arg);
+}
+static
+void builtin_foreach(ScriptState *st)
+{
+    int x0, y0, x1, y1, bl_num;
+
+    dumb_ptr<block_list> caster = map_id2bl(st->rid);
+    bl_num = conv_num(st, &AARG(0));
+    MapName mapname = stringish<MapName>(ZString(conv_str(st, &AARG(1))));
+    x0 = conv_num(st, &AARG(2));
+    y0 = conv_num(st, &AARG(3));
+    x1 = conv_num(st, &AARG(4));
+    y1 = conv_num(st, &AARG(5));
+    ZString event_ = ZString(conv_str(st, &AARG(6)));
+    BL block_type;
+    NpcEvent event;
+    extract(event_, &event);
+
+    P<map_local> m = TRY_UNWRAP(map_mapname2mapid(mapname), return);
+
+    switch (bl_num)
+    {
+        case 0:
+            block_type = BL::PC;
+            break;
+        case 1:
+            block_type = BL::NPC;
+            break;
+        case 2:
+            block_type = BL::MOB;
+            break;
+        default:
+            return;
+    }
+
+    map_foreachinarea(std::bind(builtin_foreach_sub, ph::_1, event, caster->bl_id),
+            m,
+            x0, y0,
+            x1, y1,
+            block_type);
+}
+
+/*==========================================
  * 変数設定
  *------------------------------------------
  */
@@ -3519,6 +3574,7 @@ BuiltinFunction builtin_functions[] =
     BUILTIN(getlook, "i"_s, 'i'),
     BUILTIN(getsavepoint, "i"_s, '.'),
     BUILTIN(areatimer, "MxyxytEi"_s, '\0'),
+    BUILTIN(foreach, "iMxyxyE"_s, '\0'),
     BUILTIN(isin, "Mxyxy"_s, 'i'),
     BUILTIN(iscollision, "Mxy"_s, 'i'),
     BUILTIN(shop, "s"_s, '\0'),
