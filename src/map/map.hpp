@@ -202,7 +202,7 @@ struct map_session_data : block_list, SessionData
     // used by @hugo and @linus
     BlockId followtarget;
 
-    tick_t cast_tick;     // [Fate] Next tick at which spellcasting is allowed
+    //tick_t cast_tick;     // [Fate] Next tick at which spellcasting is allowed
     BlockId attack_spell_override; // [Fate] When an attack spell is active for this player, they trigger it
     NpcEvent magic_attack;
     // like a weapon.  Check pc_attack_timer() for details.

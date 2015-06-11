@@ -741,7 +741,7 @@ int pc_authok(AccountId id, int login_id2,
     // The above is no longer accurate now that we use <chrono>, but
     // I'm still not reverting this.
     // -o11c
-    sd->cast_tick = tick; // + pc_readglobalreg (sd, "MAGIC_CAST_TICK"_s);
+    //sd->cast_tick = tick; // + pc_readglobalreg (sd, "MAGIC_CAST_TICK"_s);
 
     // アカウント変数の送信要求
     intif_request_accountreg(sd);
@@ -3271,7 +3271,7 @@ int pc_damage(dumb_ptr<block_list> src, dumb_ptr<map_session_data> sd,
     clif_updatestatus(sd, SP::HP);
     pc_calcstatus(sd, 0);
     // [Fate] Reset magic
-    sd->cast_tick = gettick();
+    //sd->cast_tick = gettick();
     //magic_stop_completely(sd);
 
     if (battle_config.death_penalty_type > 0 && sd->status.base_level >= 20)

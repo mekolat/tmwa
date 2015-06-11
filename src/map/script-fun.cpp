@@ -258,7 +258,6 @@ void builtin_menu(ScriptState *st)
             buf += choice_str;
             buf += ':';
         }
-
         clif_scriptmenu(script_rid2sd(st), st->oid, AString(buf));
     }
     else
@@ -3278,31 +3277,21 @@ void builtin_npctalk(ScriptState *st)
 }
 
 /*==========================================
-  * casttime
-  *------------------------------------------
-  */
-static
-void builtin_casttime(ScriptState *st)
-{
-    dumb_ptr<map_session_data> sd = script_rid2sd(st);
-    interval_t tick = static_cast<interval_t>(conv_num(st, &AARG(0)));
-    sd->cast_tick = gettick() + tick;
-}
-
-/*==========================================
   * register cmd
   *------------------------------------------
   */
 static
 void builtin_registercmd(ScriptState *st)
 {
-    dumb_ptr<npc_data> nd = map_id_is_npc(st->oid);
     RString evoke = conv_str(st, &AARG(0));
+    NpcName npcname = stringish<NpcName>(conv_str(st, &AARG(1)));
     ZString event_ = conv_str(st, &AARG(1));
     NpcEvent event;
     extract(event_, &event);
-
-    spells_by_name.put(evoke, event);
+    if (event.label)
+        spells_by_events.put(evoke, event);
+    else
+        spells_by_name.put(evoke, npcname);
 }
 
 /*==========================================
@@ -3791,8 +3780,7 @@ BuiltinFunction builtin_functions[] =
     BUILTIN(npcareawarp, "xyxyis"_s, '\0'),
     BUILTIN(message, "Ps"_s, '\0'),
     BUILTIN(npctalk, "ss?"_s, '\0'),
-    BUILTIN(casttime, "i"_s, '\0'),
-    BUILTIN(registercmd, "sE"_s, '\0'),
+    BUILTIN(registercmd, "ss"_s, '\0'),
     BUILTIN(title, "s"_s, '\0'),
     BUILTIN(music, "s"_s, '\0'),
     BUILTIN(mapmask, "i?"_s, '\0'),
