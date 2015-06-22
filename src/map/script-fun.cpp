@@ -2156,6 +2156,20 @@ void builtin_addtimer(ScriptState *st)
 }
 
 /*==========================================
+ * NPCイベントタイマー追加
+ *------------------------------------------
+ */
+static
+void builtin_addnpctimer(ScriptState *st)
+{
+    interval_t tick = static_cast<interval_t>(conv_num(st, &AARG(0)));
+    ZString event_ = ZString(conv_str(st, &AARG(1)));
+    NpcEvent event;
+    extract(event_, &event);
+    npc_addeventtimer(map_id2bl(st->oid), tick, event);
+}
+
+/*==========================================
  * NPCタイマー初期化
  *------------------------------------------
  */
@@ -4082,6 +4096,7 @@ BuiltinFunction builtin_functions[] =
     BUILTIN(killmonster, "ME"_s, '\0'),
     BUILTIN(donpcevent, "E"_s, '\0'),
     BUILTIN(addtimer, "tE"_s, '\0'),
+    BUILTIN(addnpctimer, "tE"_s, '\0'),
     BUILTIN(initnpctimer, "?"_s, '\0'),
     BUILTIN(startnpctimer, "?"_s, '\0'),
     BUILTIN(stopnpctimer, "?"_s, '\0'),
