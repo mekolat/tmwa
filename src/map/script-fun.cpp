@@ -3887,6 +3887,18 @@ void builtin_gety(ScriptState *st)
     push_int<ScriptDataInt>(st->stack, sd->bl_y);
 }
 
+/*============================
+ * Gets the PC's direction
+ *----------------------------
+ */
+static
+void builtin_getdir(ScriptState *st)
+{
+    dumb_ptr<map_session_data> sd = script_rid2sd(st);
+
+    push_int<ScriptDataInt>(st->stack, static_cast<uint8_t>(sd->dir));
+}
+
 /*
  * Get the PC's current map's name
  */
@@ -4143,6 +4155,7 @@ BuiltinFunction builtin_functions[] =
     BUILTIN(destroy, "?"_s, '\0'),
     BUILTIN(getx, ""_s, 'i'),
     BUILTIN(gety, ""_s, 'i'),
+    BUILTIN(getdir, ""_s, 'i'),
     BUILTIN(getnpcx, "?"_s, 'i'),
     BUILTIN(getnpcy, "?"_s, 'i'),
     BUILTIN(strnpcinfo, "i?"_s, 's'),
