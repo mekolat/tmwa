@@ -69,13 +69,13 @@ enum class ScriptEndState
 };
 
 dumb_ptr<map_session_data> script_rid2sd(ScriptState *st);
-void get_val(dumb_ptr<map_session_data> sd, struct script_data *data);
+void get_val(dumb_ptr<block_list> sd, struct script_data *data);
 __attribute__((deprecated))
 void get_val(ScriptState *st, struct script_data *data);
 struct script_data get_val2(ScriptState *st, SIR reg);
-void set_reg(dumb_ptr<map_session_data> sd, VariableCode type, SIR reg, struct script_data vd);
-void set_reg(dumb_ptr<map_session_data> sd, VariableCode type, SIR reg, int id);
-void set_reg(dumb_ptr<map_session_data> sd, VariableCode type, SIR reg, RString zd);
+void set_reg(dumb_ptr<block_list> sd, VariableCode type, SIR reg, struct script_data vd);
+void set_reg(dumb_ptr<block_list> sd, VariableCode type, SIR reg, int id);
+void set_reg(dumb_ptr<block_list> sd, VariableCode type, SIR reg, RString zd);
 __attribute__((warn_unused_result))
 RString conv_str(ScriptState *st, struct script_data *data);
 __attribute__((warn_unused_result))

@@ -47,10 +47,10 @@
 #include "globals.hpp"
 #include "intif.hpp"
 #include "itemdb.hpp"
-#include "magic-interpreter-base.hpp"
 #include "map.hpp"
 #include "mob.hpp"
 #include "npc.hpp"
+#include "npc-parse.hpp"
 #include "party.hpp"
 #include "pc.hpp"
 #include "script-call-internal.hpp"
@@ -58,6 +58,7 @@
 #include "script-persist.hpp"
 #include "skill.hpp"
 #include "storage.hpp"
+#include "npc-internal.hpp"
 
 #include "../poison.hpp"
 
@@ -252,7 +253,6 @@ void builtin_menu(ScriptState *st)
             buf += choice_str;
             buf += ':';
         }
-
         clif_scriptmenu(script_rid2sd(st), st->oid, AString(buf));
     }
     else
@@ -413,6 +413,81 @@ void builtin_heal(ScriptState *st)
  *------------------------------------------
  */
 static
+void builtin_elttype(ScriptState *st)
+{
+    int element_type = static_cast<int>(battle_get_element(map_id2bl(wrap<BlockId>(conv_num(st, &AARG(0))))).element);
+    push_int<ScriptDataInt>(st->stack, element_type);
+}
+
+/*==========================================
+ *
+ *------------------------------------------
+ */
+static
+void builtin_eltlvl(ScriptState *st)
+{
+    int element_lvl = static_cast<int>(battle_get_element(map_id2bl(wrap<BlockId>(conv_num(st, &AARG(0))))).level);
+    push_int<ScriptDataInt>(st->stack, element_lvl);
+}
+
+/*==========================================
+ *
+ *------------------------------------------
+ */
+static
+void builtin_injure(ScriptState *st)
+{
+    dumb_ptr<block_list> caster = map_id2bl(st->rid);
+    dumb_ptr<block_list> target = map_id2bl(wrap<BlockId>(conv_num(st, &AARG(0))));
+    int damage_caused = conv_num(st, &AARG(1));
+    int mp_damage = conv_num(st, &AARG(2));
+    int target_hp = battle_get_hp(target);
+    int mdef = battle_get_mdef(target);
+
+    if (target->bl_type == BL::PC
+        && !target->bl_m->flag.get(MapFlag::PVP)
+        && (caster->bl_type == BL::PC)
+        && ((caster->is_player()->state.pvpchannel > 1) && (target->is_player()->state.pvpchannel != caster->is_player()->state.pvpchannel)))
+        return;               /* Cannot damage other players outside of pvp */
+
+    if (target != caster)
+    {
+        /* Not protected against own spells */
+        damage_caused = (damage_caused * (100 - mdef)) / 100;
+        mp_damage = (mp_damage * (100 - mdef)) / 100;
+    }
+
+    damage_caused = (damage_caused > target_hp) ? target_hp : damage_caused;
+
+    if (damage_caused < 0)
+        damage_caused = 0;
+
+    // display damage first, because dealing damage may deallocate the target.
+    clif_damage(caster, target,
+            gettick(), interval_t::zero(), interval_t::zero(),
+            damage_caused, 0, DamageType::NORMAL);
+
+    if (caster->bl_type == BL::PC)
+    {
+        dumb_ptr<map_session_data> caster_pc = caster->is_player();
+        if (target->bl_type == BL::MOB)
+        {
+            dumb_ptr<mob_data> mob = target->is_mob();
+            dumb_ptr<npc_data> nd = map_id_is_npc(st->oid);
+            MAP_LOG_PC(caster_pc, "SPELLDMG MOB%d %d FOR %d BY %s"_fmt,
+                    mob->bl_id, mob->mob_class, damage_caused, caster->is_player()->magic_attack);
+        }
+    }
+    battle_damage(caster, target, damage_caused, mp_damage);
+
+    return;
+}
+
+/*==========================================
+ *
+ *------------------------------------------
+ */
+static
 void builtin_input(ScriptState *st)
 {
     dumb_ptr<map_session_data> sd = nullptr;
@@ -485,20 +560,229 @@ void builtin_if (ScriptState *st)
 }
 
 /*==========================================
+ *
+ *------------------------------------------
+ */
+static
+void builtin_foreach_sub(dumb_ptr<block_list> bl, NpcEvent event, BlockId caster)
+{
+    // call_spell_event_script
+    argrec_t arg[1] =
+    {
+        {"@target_id"_s, static_cast<int32_t>(unwrap<BlockId>(bl->bl_id))},
+    };
+    npc_event_do_l(event, caster, arg);
+}
+static
+void builtin_foreach(ScriptState *st)
+{
+    int x0, y0, x1, y1, bl_num;
+
+    dumb_ptr<block_list> caster = map_id2bl(st->rid);
+    bl_num = conv_num(st, &AARG(0));
+    MapName mapname = stringish<MapName>(ZString(conv_str(st, &AARG(1))));
+    x0 = conv_num(st, &AARG(2));
+    y0 = conv_num(st, &AARG(3));
+    x1 = conv_num(st, &AARG(4));
+    y1 = conv_num(st, &AARG(5));
+    ZString event_ = ZString(conv_str(st, &AARG(6)));
+    BL block_type;
+    NpcEvent event;
+    extract(event_, &event);
+
+    P<map_local> m = TRY_UNWRAP(map_mapname2mapid(mapname), return);
+
+    switch (bl_num)
+    {
+        case 0:
+            block_type = BL::PC;
+            break;
+        case 1:
+            block_type = BL::NPC;
+            break;
+        case 2:
+            block_type = BL::MOB;
+            break;
+        default:
+            return;
+    }
+
+    map_foreachinarea(std::bind(builtin_foreach_sub, ph::_1, event, caster->bl_id),
+            m,
+            x0, y0,
+            x1, y1,
+            block_type);
+}
+/*========================================
+ * Destructs a temp NPC
+ *----------------------------------------
+ */
+static
+void builtin_destroy(ScriptState *st)
+{
+    BlockId id;
+    if (HARG(0))
+        id = wrap<BlockId>(conv_num(st, &AARG(0)));
+    else
+        id = st->oid;
+
+    dumb_ptr<npc_data_script> nd = map_id2bl(id)->is_npc()->is_script();
+    if(!nd)
+        return;
+
+    assert(nd->disposable == true);
+    dumb_ptr<npc_data_script> nd_null;
+    npc_enable(nd->name, 0);
+    npcs_by_name.put(nd->name, nd_null);
+    npc_delete(nd);
+    if (!HARG(0))
+        st->state = ScriptEndState::END;
+}
+/*========================================
+ * Creates a temp NPC
+ *----------------------------------------
+ */
+
+static
+void builtin_puppet(ScriptState *st)
+{
+    int x, y;
+
+    dumb_ptr<block_list> bl = map_id2bl(st->oid);
+    dumb_ptr<npc_data_script> old_nd = bl->is_npc()->is_script();
+    dumb_ptr<map_session_data> sd = script_rid2sd(st);
+    dumb_ptr<npc_data_script> nd;
+    nd.new_();
+
+    MapName mapname = stringish<MapName>(ZString(conv_str(st, &AARG(0))));
+    x = conv_num(st, &AARG(1));
+    y = conv_num(st, &AARG(2));
+    Species sprite = wrap<Species>(static_cast<uint16_t>(conv_num(st, &AARG(4))));
+
+    P<map_local> m = TRY_UNWRAP(map_mapname2mapid(mapname), return);
+
+    nd->bl_prev = nd->bl_next = nullptr;
+    nd->scr.event_needs_map = false;
+    nd->disposable = true; // allow to destroy
+
+    // PlayerName::SpellName
+    NpcName npc = stringish<NpcName>(ZString(conv_str(st, &AARG(3))));
+    PRINTF("Npc: %s\n"_fmt, npc);
+    nd->name = npc;
+
+    // Dynamically set location
+    nd->bl_m = m;
+    nd->bl_x = x;
+    nd->bl_y = y;
+    nd->bl_id = npc_get_new_npc_id();
+    nd->dir = DIR::S;
+    nd->flag = 0;
+    nd->sit = DamageType::STAND;
+    nd->npc_class = sprite;
+    nd->speed = 200_ms;
+    nd->option = Opt0::ZERO;
+    nd->opt1 = Opt1::ZERO;
+    nd->opt2 = Opt2::ZERO;
+    nd->opt3 = Opt3::ZERO;
+    nd->scr.label_listv = old_nd->scr.label_listv;
+    nd->bl_type = BL::NPC;
+    nd->npc_subtype = NpcSubtype::SCRIPT;
+    npc_script++;
+
+    nd->n = map_addnpc(nd->bl_m, nd);
+
+    map_addblock(nd);
+    clif_spawnnpc(nd);
+
+    register_npc_name(nd);
+
+    for (npc_label_list& el : old_nd->scr.label_listv)
+    {
+        ScriptLabel lname = el.name;
+        int pos = el.pos;
+
+        if (lname.startswith("On"_s))
+        {
+            struct event_data ev {};
+            ev.nd = old_nd;
+            ev.child = nd->bl_id;
+            ev.pos = pos;
+            NpcEvent buf;
+            buf.npc = nd->name;
+            buf.label = lname;
+            ev_db.insert(buf, ev);
+        }
+    }
+
+    for (npc_label_list& el : old_nd->scr.label_listv)
+    {
+        int t_ = 0;
+        ScriptLabel lname = el.name;
+        int pos = el.pos;
+        if (lname.startswith("OnTimer"_s) && extract(lname.xslice_t(7), &t_) && t_ > 0)
+        {
+            interval_t t = static_cast<interval_t>(t_);
+
+            npc_timerevent_list tel {};
+            tel.timer = t;
+            tel.pos = pos;
+            tel.parent = old_nd->bl_id;
+
+            auto it = std::lower_bound(nd->scr.timer_eventv.begin(), nd->scr.timer_eventv.end(), tel,
+                    [](const npc_timerevent_list& l, const npc_timerevent_list& r)
+                    {
+                        return l.timer < r.timer;
+                    }
+            );
+            assert (it == nd->scr.timer_eventv.end() || it->timer != tel.timer);
+
+            nd->scr.timer_eventv.insert(it, std::move(tel));
+        }
+    }
+
+    nd->scr.timer = interval_t::zero();
+    nd->scr.next_event = nd->scr.timer_eventv.begin();
+
+    push_int<ScriptDataInt>(st->stack, unwrap<BlockId>(nd->bl_id));
+}
+
+/*==========================================
  * 変数設定
  *------------------------------------------
  */
 static
 void builtin_set(ScriptState *st)
 {
-    dumb_ptr<map_session_data> sd = nullptr;
+    BlockId id;
+    dumb_ptr<block_list> bl = nullptr;
     if (auto *u = AARG(0).get_if<ScriptDataParam>())
     {
         SIR reg = u->reg;
-        sd = script_rid2sd(st);
+        if(HARG(2))
+        {
+            struct script_data *sdata = &AARG(2);
+            get_val(st, sdata);
+            CharName name;
+            if (sdata->is<ScriptDataStr>())
+            {
+                name = stringish<CharName>(ZString(conv_str(st, sdata)));
+                if (name.to__actual())
+                    bl = map_nick2sd(name);
+            }
+            else
+            {
+                id = wrap<BlockId>(conv_num(st, sdata));
+                bl = map_id2bl(id);
+            }
+        }
 
+        else
+            bl = script_rid2sd(st)->is_player();
+
+        if (bl == nullptr)
+            return;
         int val = conv_num(st, &AARG(1));
-        set_reg(sd, VariableCode::PARAM, reg, val);
+        set_reg(bl, VariableCode::PARAM, reg, val);
         return;
     }
 
@@ -509,19 +793,63 @@ void builtin_set(ScriptState *st)
     char postfix = name.back();
 
     if (prefix != '$')
-        sd = script_rid2sd(st);
+    {
+        if(HARG(2))
+        {
+            struct script_data *sdata = &AARG(2);
+            get_val(st, sdata);
+            if(prefix == '.')
+            {
+                NpcName name;
+                if (sdata->is<ScriptDataStr>())
+                {
+                    name = stringish<NpcName>(ZString(conv_str(st, sdata)));
+                    bl = npc_name2id(name);
+                }
+                else
+                {
+                    id = wrap<BlockId>(conv_num(st, sdata));
+                    bl = map_id2bl(id);
+                }
+            }
+            else
+            {
+                CharName name;
+                if (sdata->is<ScriptDataStr>())
+                {
+                    name = stringish<CharName>(ZString(conv_str(st, sdata)));
+                    if (name.to__actual())
+                        bl = map_nick2sd(name);
+                }
+                else
+                {
+                    id = wrap<BlockId>(conv_num(st, sdata));
+                    bl = map_id2bl(id);
+                }
+            }
+        }
+        else
+        {
+            if(prefix == '.')
+                bl = map_id2bl(st->oid)->is_npc();
+            else
+                bl = map_id2bl(st->rid)->is_player();
+        }
+        if (bl == nullptr)
+            return;
+    }
 
     if (postfix == '$')
     {
         // 文字列
         RString str = conv_str(st, &AARG(1));
-        set_reg(sd, VariableCode::VARIABLE, reg, str);
+        set_reg(bl, VariableCode::VARIABLE, reg, str);
     }
     else
     {
         // 数値
         int val = conv_num(st, &AARG(1));
-        set_reg(sd, VariableCode::VARIABLE, reg, val);
+        set_reg(bl, VariableCode::VARIABLE, reg, val);
     }
 
 }
@@ -533,26 +861,28 @@ void builtin_set(ScriptState *st)
 static
 void builtin_setarray(ScriptState *st)
 {
-    dumb_ptr<map_session_data> sd = nullptr;
+    dumb_ptr<block_list> bl = nullptr;
     SIR reg = AARG(0).get_if<ScriptDataVariable>()->reg;
     ZString name = variable_names.outtern(reg.base());
     char prefix = name.front();
     char postfix = name.back();
 
-    if (prefix != '$' && prefix != '@')
+    if (prefix != '$' && prefix != '@' && prefix != '.')
     {
         PRINTF("builtin_setarray: illegal scope!\n"_fmt);
         return;
     }
-    if (prefix != '$')
-        sd = script_rid2sd(st);
+    if (prefix == '.')
+        bl = map_id2bl(st->oid)->is_npc();
+    else if (prefix != '$')
+        bl = map_id2bl(st->rid)->is_player();
 
     for (int j = 0, i = 1; i < st->end - st->start - 2 && j < 256; i++, j++)
     {
         if (postfix == '$')
-            set_reg(sd, VariableCode::VARIABLE, reg.iplus(j), conv_str(st, &AARG(i)));
+            set_reg(bl, VariableCode::VARIABLE, reg.iplus(j), conv_str(st, &AARG(i)));
         else
-            set_reg(sd, VariableCode::VARIABLE, reg.iplus(j), conv_num(st, &AARG(i)));
+            set_reg(bl, VariableCode::VARIABLE, reg.iplus(j), conv_num(st, &AARG(i)));
     }
 }
 
@@ -563,27 +893,29 @@ void builtin_setarray(ScriptState *st)
 static
 void builtin_cleararray(ScriptState *st)
 {
-    dumb_ptr<map_session_data> sd = nullptr;
+    dumb_ptr<block_list> bl = nullptr;
     SIR reg = AARG(0).get_if<ScriptDataVariable>()->reg;
     ZString name = variable_names.outtern(reg.base());
     char prefix = name.front();
     char postfix = name.back();
     int sz = conv_num(st, &AARG(2));
 
-    if (prefix != '$' && prefix != '@')
+    if (prefix != '$' && prefix != '@' && prefix != '.')
     {
         PRINTF("builtin_cleararray: illegal scope!\n"_fmt);
         return;
     }
-    if (prefix != '$')
-        sd = script_rid2sd(st);
+    if (prefix == '.')
+        bl = map_id2bl(st->oid)->is_npc();
+    else if (prefix != '$')
+        bl = map_id2bl(st->rid)->is_player();
 
     for (int i = 0; i < sz; i++)
     {
         if (postfix == '$')
-            set_reg(sd, VariableCode::VARIABLE, reg.iplus(i), conv_str(st, &AARG(1)));
+            set_reg(bl, VariableCode::VARIABLE, reg.iplus(i), conv_str(st, &AARG(1)));
         else
-            set_reg(sd, VariableCode::VARIABLE, reg.iplus(i), conv_num(st, &AARG(1)));
+            set_reg(bl, VariableCode::VARIABLE, reg.iplus(i), conv_num(st, &AARG(1)));
     }
 
 }
@@ -627,7 +959,7 @@ void builtin_getarraysize(ScriptState *st)
     ZString name = variable_names.outtern(reg.base());
     char prefix = name.front();
 
-    if (prefix != '$' && prefix != '@')
+    if (prefix != '$' && prefix != '@' && prefix != '.')
     {
         PRINTF("builtin_copyarray: illegal scope!\n"_fmt);
         return;
@@ -1064,7 +1396,10 @@ void builtin_getequipid(ScriptState *st)
     int num;
     dumb_ptr<map_session_data> sd;
 
-    sd = script_rid2sd(st);
+    if (HARG(1))
+        sd = map_nick2sd(stringish<CharName>(ZString(conv_str(st, &AARG(1)))));
+    else
+        sd = script_rid2sd(st);
     if (sd == nullptr)
     {
         PRINTF("getequipid: sd == nullptr\n"_fmt);
@@ -1191,6 +1526,31 @@ void builtin_getskilllv(ScriptState *st)
 {
     SkillID id = SkillID(conv_num(st, &AARG(0)));
     push_int<ScriptDataInt>(st->stack, pc_checkskill(script_rid2sd(st), id));
+}
+
+/*==========================================
+ *
+ *------------------------------------------
+ */
+static
+void builtin_overrideattack(ScriptState *st)
+{
+    dumb_ptr<map_session_data> sd = script_rid2sd(st);
+    int charges = conv_num(st, &AARG(0));
+    interval_t attack_delay = static_cast<interval_t>(conv_num(st, &AARG(1)));
+    int attack_range = conv_num(st, &AARG(2));
+    StatusChange icon = StatusChange(conv_num(st, &AARG(3)));
+    ItemNameId look = wrap<ItemNameId>(static_cast<uint16_t>(conv_num(st, &AARG(4))));
+    ZString event_ = ZString(conv_str(st, &AARG(5)));
+
+    NpcEvent event;
+    extract(event_, &event);
+
+    sd->attack_spell_override = st->oid;
+    sd->attack_spell_charges = charges;
+    sd->magic_attack = event;
+    pc_set_weapon_icon(sd, charges, icon, look);
+    pc_set_attack_info(sd, attack_delay, attack_range);
 }
 
 /*==========================================
@@ -1389,6 +1749,42 @@ void builtin_getexp(ScriptState *st)
     if (sd)
         pc_gainexp_reason(sd, base, job, PC_GAINEXP_REASON::SCRIPT);
 
+}
+
+static
+void builtin_summon(ScriptState *st)
+{
+    Species mob_class;
+    int amount, x, y, i;
+    NpcEvent event;
+    dumb_ptr<map_session_data> sd = map_id2sd(st->rid);
+    tick_t tick = gettick();
+    MapName mapname = stringish<MapName>(ZString(conv_str(st, &AARG(0))));
+    x = conv_num(st, &AARG(1));
+    y = conv_num(st, &AARG(2));
+    MobName str = stringish<MobName>(ZString(conv_str(st, &AARG(3))));
+    mob_class = wrap<Species>(conv_num(st, &AARG(4)));
+    amount = conv_num(st, &AARG(5));
+    interval_t monster_lifetime = static_cast<interval_t>(conv_num(st, &AARG(6)));
+    if (HARG(7))
+        extract(ZString(conv_str(st, &AARG(7))), &event);
+
+    for (i = 0; i < amount; i++)
+    {
+        BlockId id = mob_once_spawn(sd, mapname, x, y, str, mob_class, 1, event);
+        dumb_ptr<mob_data> md = map_id_is_mob(id);
+        if (md)
+        {
+            md->master_id = sd->bl_id;
+            md->master_dist = 6;
+            md->state.special_mob_ai = 1;
+            md->mode = get_mob_db(md->mob_class).mode | MobMode::AGGRESSIVE | MobMode::SUMMONED | MobMode::TURNS_AGAINST_BAD_MASTER;
+            md->deletetimer = Timer(tick + monster_lifetime,
+                    std::bind(mob_timer_delete, ph::_1, ph::_2,
+                        id));
+            clif_misceffect(md, 344);
+        }
+    }
 }
 
 /*==========================================
@@ -1778,6 +2174,38 @@ void builtin_getmapusers(ScriptState *st)
     push_int<ScriptDataInt>(st->stack, users);
 }
 
+static
+void builtin_aggravate_sub(dumb_ptr<block_list> bl, dumb_ptr<block_list> target, int effect)
+{
+    dumb_ptr<mob_data> md = bl->is_mob();
+
+    if (mob_aggravate(md, target))
+        clif_misceffect(bl, effect);
+}
+
+static
+void builtin_aggravate(ScriptState *st)
+{
+    dumb_ptr<block_list> target = map_id2bl(st->rid);
+    MapName str = stringish<MapName>(ZString(conv_str(st, &AARG(0))));
+    int x0 = conv_num(st, &AARG(1));
+    int y0 = conv_num(st, &AARG(2));
+    int x1 = conv_num(st, &AARG(3));
+    int y1 = conv_num(st, &AARG(4));
+    int effect = conv_num(st, &AARG(5));
+    P<map_local> m = TRY_UNWRAP(map_mapname2mapid(str),
+    {
+        push_int<ScriptDataInt>(st->stack, -1);
+        return;
+    });
+
+    map_foreachinarea(std::bind(builtin_aggravate_sub, ph::_1, target, effect),
+            m,
+            x0, y0,
+            x1, y1,
+            BL::MOB);
+}
+
 /*==========================================
  * エリア指定ユーザー数所得
  *------------------------------------------
@@ -2007,6 +2435,7 @@ void builtin_attachrid(ScriptState *st)
     st->rid = wrap<BlockId>(conv_num(st, &AARG(0)));
     push_int<ScriptDataInt>(st->stack, (map_id2sd(st->rid) != nullptr));
 }
+
 
 /*==========================================
  * RIDのデタッチ
@@ -2303,23 +2732,56 @@ void builtin_getitemlink(ScriptState *st)
 }
 
 static
-void builtin_getspellinvocation(ScriptState *st)
-{
-    RString name = conv_str(st, &AARG(0));
-
-    AString invocation = magic::magic_find_invocation(name);
-    if (!invocation)
-        invocation = "..."_s;
-
-    push_str<ScriptDataStr>(st->stack, invocation);
-}
-
-static
 void builtin_getpartnerid2(ScriptState *st)
 {
     dumb_ptr<map_session_data> sd = script_rid2sd(st);
 
     push_int<ScriptDataInt>(st->stack, unwrap<CharId>(sd->status.partner_id));
+}
+
+static
+void builtin_explode(ScriptState *st)
+{
+    dumb_ptr<block_list> bl = nullptr;
+    SIR reg = AARG(0).get_if<ScriptDataVariable>()->reg;
+    ZString name = variable_names.outtern(reg.base());
+    const char separator = conv_str(st, &AARG(2))[0];
+    RString str = conv_str(st, &AARG(1));
+    RString val;
+    char prefix = name.front();
+    char postfix = name.back();
+
+    if (prefix != '$' && prefix != '@' && prefix != '.')
+    {
+        PRINTF("builtin_explode: illegal scope!\n"_fmt);
+        return;
+    }
+    if (prefix == '.')
+        bl = map_id2bl(st->oid)->is_npc();
+    else if (prefix != '$')
+        bl = map_id2bl(st->rid)->is_player();
+
+    for (int j = 0; j < 256; j++)
+    {
+        auto find = std::find(str.begin(), str.end(), separator);
+        if (find == str.end())
+        {
+            if (postfix == '$')
+                set_reg(bl, VariableCode::VARIABLE, reg.iplus(j), str);
+            else
+                set_reg(bl, VariableCode::VARIABLE, reg.iplus(j), atoi(str.c_str()));
+            break;
+        }
+        {
+            val = str.xislice_h(find);
+            str = str.xislice_t(find + 1);
+
+            if (postfix == '$')
+                set_reg(bl, VariableCode::VARIABLE, reg.iplus(j), val);
+            else
+                set_reg(bl, VariableCode::VARIABLE, reg.iplus(j), atoi(val.c_str()));
+        }
+    }
 }
 
 /*==========================================
@@ -2521,6 +2983,97 @@ void builtin_specialeffect2(ScriptState *st)
                                   &AARG(0)),
                         0);
 
+}
+
+static
+void builtin_get(ScriptState *st)
+{
+    BlockId id;
+    dumb_ptr<block_list> bl = nullptr;
+    if (auto *u = AARG(0).get_if<ScriptDataParam>())
+    {
+        SIR reg = u->reg;
+        struct script_data *sdata = &AARG(1);
+        get_val(st, sdata);
+        CharName name;
+        if (sdata->is<ScriptDataStr>())
+        {
+            name = stringish<CharName>(ZString(conv_str(st, sdata)));
+            if (name.to__actual())
+                bl = map_nick2sd(name);
+        }
+        else
+        {
+            id = wrap<BlockId>(conv_num(st, sdata));
+            bl = map_id2bl(id);
+        }
+
+        if (bl == nullptr)
+            return;
+        int var = pc_readparam(bl->is_player(), reg.sp());
+        push_int<ScriptDataInt>(st->stack, var);
+        return;
+    }
+
+    struct script_data *sdata = &AARG(1);
+    get_val(st, sdata);
+
+    SIR reg = AARG(0).get_if<ScriptDataVariable>()->reg;
+    ZString name = variable_names.outtern(reg.base());
+    char prefix = name.front();
+    char postfix = name.back();
+
+    if(prefix == '.')
+    {
+        NpcName name;
+        if (sdata->is<ScriptDataStr>())
+        {
+            name = stringish<NpcName>(ZString(conv_str(st, sdata)));
+            bl = npc_name2id(name);
+        }
+        else
+        {
+            id = wrap<BlockId>(conv_num(st, sdata));
+            bl = map_id2bl(id);
+        }
+    }
+    else if(prefix != '$')
+    {
+        CharName name;
+        if (sdata->is<ScriptDataStr>())
+        {
+            name = stringish<CharName>(ZString(conv_str(st, sdata)));
+            if (name.to__actual())
+                bl = map_nick2sd(name);
+        }
+        else
+        {
+            id = wrap<BlockId>(conv_num(st, sdata));
+            bl = map_id2bl(id);
+        }
+    }
+    else
+    {
+        PRINTF("builtin_get: illegal scope !\n"_fmt);
+        return;
+    }
+
+    if (!bl)
+    {
+        PRINTF("builtin_get: no block list attached !\n"_fmt);
+        return;
+    }
+
+    if (postfix == '$')
+    {
+        ZString var = pc_readregstr(bl, reg);
+        push_str<ScriptDataStr>(st->stack, var);
+    }
+    else
+    {
+        int var = pc_readreg(bl, reg);
+        push_int<ScriptDataInt>(st->stack, var);
+    }
 }
 
 /*==========================================
@@ -2785,6 +3338,24 @@ void builtin_npctalk(ScriptState *st)
 }
 
 /*==========================================
+  * register cmd
+  *------------------------------------------
+  */
+static
+void builtin_registercmd(ScriptState *st)
+{
+    RString evoke = conv_str(st, &AARG(0));
+    NpcName npcname = stringish<NpcName>(conv_str(st, &AARG(1)));
+    ZString event_ = conv_str(st, &AARG(1));
+    NpcEvent event;
+    extract(event_, &event);
+    if (event.label)
+        spells_by_events.put(evoke, event);
+    else
+        spells_by_name.put(evoke, npcname);
+}
+
+/*==========================================
   * getlook char info. getlook(arg)
   *------------------------------------------
   */
@@ -2868,31 +3439,56 @@ void builtin_getsavepoint(ScriptState *st)
 static
 void builtin_areatimer_sub(dumb_ptr<block_list> bl, interval_t tick, NpcEvent event)
 {
-    pc_addeventtimer(bl->is_player(), tick, event);
+    if (bl->bl_type == BL::PC)
+    {
+        dumb_ptr<map_session_data> sd = map_id_is_player(bl->bl_id);
+        pc_addeventtimer(sd, tick, event);
+    }
+    else
+    {
+        npc_addeventtimer(bl, tick, event);
+    }
 }
 
 static
 void builtin_areatimer(ScriptState *st)
 {
-    int x0, y0, x1, y1;
+    int x0, y0, x1, y1, bl_num;
 
-    MapName mapname = stringish<MapName>(ZString(conv_str(st, &AARG(0))));
-    x0 = conv_num(st, &AARG(1));
-    y0 = conv_num(st, &AARG(2));
-    x1 = conv_num(st, &AARG(3));
-    y1 = conv_num(st, &AARG(4));
-    interval_t tick = static_cast<interval_t>(conv_num(st, &AARG(5)));
-    ZString event_ = ZString(conv_str(st, &AARG(6)));
+    bl_num = conv_num(st, &AARG(0));
+    MapName mapname = stringish<MapName>(ZString(conv_str(st, &AARG(1))));
+    x0 = conv_num(st, &AARG(2));
+    y0 = conv_num(st, &AARG(3));
+    x1 = conv_num(st, &AARG(4));
+    y1 = conv_num(st, &AARG(5));
+    interval_t tick = static_cast<interval_t>(conv_num(st, &AARG(6)));
+    ZString event_ = conv_str(st, &AARG(7));
+    BL block_type;
     NpcEvent event;
     extract(event_, &event);
 
     P<map_local> m = TRY_UNWRAP(map_mapname2mapid(mapname), return);
 
+    switch (bl_num)
+    {
+        case 0:
+            block_type = BL::PC;
+            break;
+        case 1:
+            block_type = BL::NPC;
+            break;
+        case 2:
+            block_type = BL::MOB;
+            break;
+        default:
+            return;
+    }
+
     map_foreachinarea(std::bind(builtin_areatimer_sub, ph::_1, tick, event),
             m,
             x0, y0,
             x1, y1,
-            BL::PC);
+            block_type);
 }
 
 /*==========================================
@@ -3147,9 +3743,13 @@ BuiltinFunction builtin_functions[] =
     BUILTIN(warp, "Mxy"_s, '\0'),
     BUILTIN(areawarp, "MxyxyMxy"_s, '\0'),
     BUILTIN(heal, "ii?"_s, '\0'),
+    BUILTIN(elttype, "i"_s, 'i'),
+    BUILTIN(eltlvl, "i"_s, 'i'),
+    BUILTIN(injure, "iii"_s, '\0'),
     BUILTIN(input, "N"_s, '\0'),
     BUILTIN(if, "iF*"_s, '\0'),
-    BUILTIN(set, "Ne"_s, '\0'),
+    BUILTIN(set, "Ne?"_s, '\0'),
+    BUILTIN(get, "Ne"_s, '.'),
     BUILTIN(setarray, "Ne*"_s, '\0'),
     BUILTIN(cleararray, "Nei"_s, '\0'),
     BUILTIN(getarraysize, "N"_s, 'i'),
@@ -3163,12 +3763,13 @@ BuiltinFunction builtin_functions[] =
     BUILTIN(getcharid, "i?"_s, 'i'),
     BUILTIN(getversion, ""_s, 'i'),
     BUILTIN(strcharinfo, "i"_s, 's'),
-    BUILTIN(getequipid, "i"_s, 'i'),
+    BUILTIN(getequipid, "i?"_s, 'i'),
     BUILTIN(bonus, "ii"_s, '\0'),
     BUILTIN(bonus2, "iii"_s, '\0'),
     BUILTIN(skill, "ii?"_s, '\0'),
     BUILTIN(setskill, "ii"_s, '\0'),
     BUILTIN(getskilllv, "i"_s, 'i'),
+    BUILTIN(overrideattack, "iiiiiE"_s, '\0'),
     BUILTIN(getgmlevel, ""_s, 'i'),
     BUILTIN(end, ""_s, '\0'),
     BUILTIN(getopt2, ""_s, 'i'),
@@ -3178,6 +3779,7 @@ BuiltinFunction builtin_functions[] =
     BUILTIN(gettime, "i"_s, 'i'),
     BUILTIN(openstorage, ""_s, '\0'),
     BUILTIN(getexp, "ii"_s, '\0'),
+    BUILTIN(summon, "Mxysmii?"_s, '\0'),
     BUILTIN(monster, "Mxysmi?"_s, '\0'),
     BUILTIN(areamonster, "Mxyxysmi?"_s, '\0'),
     BUILTIN(killmonster, "ME"_s, '\0'),
@@ -3221,8 +3823,8 @@ BuiltinFunction builtin_functions[] =
     BUILTIN(marriage, "P"_s, 'i'),
     BUILTIN(divorce, ""_s, 'i'),
     BUILTIN(getitemlink, "I"_s, 's'),
-    BUILTIN(getspellinvocation, "s"_s, 's'),
     BUILTIN(getpartnerid2, ""_s, 'i'),
+    BUILTIN(explode, "Nss"_s, '\0'),
     BUILTIN(getinventorylist, ""_s, '\0'),
     BUILTIN(getactivatedpoolskilllist, ""_s, '\0'),
     BUILTIN(getunactivatedpoolskilllist, ""_s, '\0'),
@@ -3241,14 +3843,21 @@ BuiltinFunction builtin_functions[] =
     BUILTIN(music, "s"_s, '\0'),
     BUILTIN(mapmask, "i?"_s, '\0'),
     BUILTIN(getmask, ""_s, 'i'),
+    BUILTIN(casttime, "i"_s, '\0'),
+    BUILTIN(registercmd, "s"_s, '\0'),
+    BUILTIN(registercmd, "ss"_s, '\0'),
     BUILTIN(getlook, "i"_s, 'i'),
     BUILTIN(getsavepoint, "i"_s, '.'),
-    BUILTIN(areatimer, "MxyxytE"_s, '\0'),
+    BUILTIN(areatimer, "MxyxytEi"_s, '\0'),
+    BUILTIN(foreach, "iMxyxyE"_s, '\0'),
     BUILTIN(isin, "Mxyxy"_s, 'i'),
     BUILTIN(iscollision, "Mxy"_s, 'i'),
     BUILTIN(shop, "s"_s, '\0'),
     BUILTIN(isdead, ""_s, 'i'),
+    BUILTIN(aggravate, "Mxyxyi"_s, '\0'),
     BUILTIN(fakenpcname, "ssi"_s, '\0'),
+    BUILTIN(puppet, "mxysi"_s, 'i'),
+    BUILTIN(destroy, "?"_s, '\0'),
     BUILTIN(getx, ""_s, 'i'),
     BUILTIN(gety, ""_s, 'i'),
     BUILTIN(getnpcx, "?"_s, 'i'),

@@ -146,6 +146,91 @@ dumb_ptr<npc_data> npc_name2id(NpcName name)
 }
 
 /*==========================================
+ * NPC Spells
+ *------------------------------------------
+ */
+NpcName spell_name2id(RString name)
+{
+    return spells_by_name.get(name);
+}
+
+/*==========================================
+ * NPC Spells Events
+ *------------------------------------------
+ */
+NpcEvent spell_event2id(RString name)
+{
+    return spells_by_events.get(name);
+}
+
+/*==========================================
+ * Spell Toknise
+ * Return a pair of strings, {spellname, parameter}
+ * Parameter may be empty.
+ *------------------------------------------
+ */
+static
+std::pair<XString, XString> magic_tokenise(XString src)
+{
+    auto seeker = std::find(src.begin(), src.end(), ' ');
+
+    if (seeker == src.end())
+    {
+        return {src, XString()};
+    }
+    else
+    {
+        XString rv1 = src.xislice_h(seeker);
+        ++seeker;
+
+        while (seeker != src.end() && *seeker == ' ')
+            ++seeker;
+
+        // Note: this very well could be empty
+        XString rv2 = src.xislice_t(seeker);
+        return {rv1, rv2};
+    }
+}
+
+/*==========================================
+ * NPC Spell
+ *------------------------------------------
+ */
+int magic_message(dumb_ptr<map_session_data> caster, XString source_invocation)
+{
+    auto pair = magic_tokenise(source_invocation);
+    // Spell Cast
+    NpcName spell_name = spell_name2id(pair.first);
+    NpcEvent spell_event = spell_event2id(pair.first);
+    PRINTF("Cast: %s\n"_fmt, RString(pair.first));
+
+    RString spell_params = pair.second;
+
+    dumb_ptr<npc_data> nd = npc_name2id(spell_event.label? spell_event.npc: spell_name);
+
+    if (nd)
+    {
+        PRINTF("NPC:  '%s' %d\n"_fmt, nd->name, nd->bl_id);
+        PRINTF("Params:  '%s'\n"_fmt, spell_params);
+        caster->npc_id = nd->bl_id;
+        dumb_ptr<block_list> map_bl = map_id2bl(nd->bl_id);
+        if (!map_bl)
+            map_addnpc(caster->bl_m, nd);
+        argrec_t arg[1] =
+        {
+            {"@args$"_s, spell_params},
+        };
+
+        if (spell_event.label)
+            caster->npc_pos = npc_event_do_l(spell_event, caster->bl_id, arg);
+        else
+            caster->npc_pos = run_script_l(ScriptPointer(borrow(*nd->is_script()->scr.script), 0), caster->bl_id, nd->bl_id, arg);
+        return 1;
+    }
+    return 0;
+}
+
+/*==========================================
  * イベントキューのイベント処理
  *------------------------------------------
  */
@@ -219,6 +304,11 @@ void npc_event_do_sub(NpcEvent key, struct event_data *ev,
 
     if (name == key)
     {
+        if (ev->child != BlockId())
+        {
+            rid = ev->child; // run as another npc
+        }
+
         run_script_l(ScriptPointer(borrow(*ev->nd->scr.script), ev->pos), rid, ev->nd->bl_id,
                 argv);
         (*c)++;
@@ -286,6 +376,94 @@ int npc_event_do_oninit(void)
     return 0;
 }
 
+/*==========================================
+ *
+ *------------------------------------------
+ */
+static
+void npc_eventtimer(TimerData *, tick_t, BlockId id, NpcEvent data)
+{
+    Option<P<struct event_data>> ev_ = ev_db.search(data);
+    dumb_ptr<npc_data_script> nd;
+    dumb_ptr<block_list> bl = map_id2bl(id);
+
+    if (ev_.is_none() && data.label == stringish<ScriptLabel>("OnTouch"_s))
+        return;
+
+    P<struct event_data> ev = TRY_UNWRAP(ev_,
+    {
+        if (battle_config.error_log)
+            PRINTF("npc_event: event not found [%s]\n"_fmt,
+                    data);
+        return;
+    });
+    if ((nd = ev->nd) == nullptr)
+    {
+        if (battle_config.error_log)
+            PRINTF("npc_event: event not found [%s]\n"_fmt,
+                    data);
+        return;
+    }
+
+    if (nd->scr.event_needs_map)
+    {
+        int xs = nd->scr.xs;
+        int ys = nd->scr.ys;
+        if (nd->bl_m != bl->bl_m)
+            return;
+        if (xs > 0
+            && (bl->bl_x < nd->bl_x - xs / 2 || nd->bl_x + xs / 2 < bl->bl_x))
+            return;
+        if (ys > 0
+            && (bl->bl_y < nd->bl_y - ys / 2 || nd->bl_y + ys / 2 < bl->bl_y))
+            return;
+    }
+
+    run_script(ScriptPointer(borrow(*nd->scr.script), ev->pos), id, nd->bl_id);
+}
+
+/*==========================================
+ *
+ *------------------------------------------
+ */
+int npc_addeventtimer(dumb_ptr<block_list> bl, interval_t tick, NpcEvent name)
+{
+    int i;
+
+    nullpo_retz(bl);
+    if (bl->bl_type == BL::MOB)
+    {
+        dumb_ptr<mob_data> md = bl->is_mob();
+        for (i = 0; i < MAX_EVENTTIMER; i++)
+            if (!md->eventtimer[i])
+                break;
+
+        if (i < MAX_EVENTTIMER)
+        {
+            md->eventtimer[i] = Timer(gettick() + tick,
+                    std::bind(npc_eventtimer, ph::_1, ph::_2,
+                        md->bl_id, name));
+            return 1;
+        }
+    }
+    if (bl->bl_type == BL::NPC)
+    {
+        dumb_ptr<npc_data> nd = bl->is_npc();
+        for (i = 0; i < MAX_EVENTTIMER; i++)
+            if (!nd->eventtimer[i])
+                break;
+
+        if (i < MAX_EVENTTIMER)
+        {
+            nd->eventtimer[i] = Timer(gettick() + tick,
+                    std::bind(npc_eventtimer, ph::_1, ph::_2,
+                        nd->bl_id, name));
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /// Callback for npc OnTimer*: labels.
 /// This will be called later if you call npc_timerevent_start.
 /// This function may only expire, but not deactivate, the counter.
@@ -313,7 +491,14 @@ void npc_timerevent(TimerData *, tick_t tick, BlockId id, interval_t data)
                     id, next));
     }
 
-    run_script(ScriptPointer(borrow(*nd->scr.script), te->pos), BlockId(), nd->bl_id);
+    if (te->parent != BlockId())
+    {
+        nd = map_id2bl(te->parent)->is_npc()->is_script();
+    }
+    else
+        id = BlockId();
+
+    run_script(ScriptPointer(borrow(*nd->scr.script), te->pos), id, nd->bl_id);
 }
 
 /// Start (or resume) counting ticks to the next npc_timerevent.

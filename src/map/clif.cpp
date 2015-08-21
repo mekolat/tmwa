@@ -62,8 +62,6 @@
 #include "globals.hpp"
 #include "intif.hpp"
 #include "itemdb.hpp"
-#include "magic.hpp"
-#include "magic-stmt.hpp"
 #include "map.hpp"
 #include "map_conf.hpp"
 #include "npc.hpp"
@@ -2618,12 +2616,6 @@ void clif_getareachar(dumb_ptr<block_list> bl, dumb_ptr<map_session_data> sd)
         case BL::ITEM:
             clif_getareachar_item(sd, bl->is_item());
             break;
-        case BL::SPELL:
-            // spell objects are not visible
-            // (at least, I *think* that's what this code is for)
-            // in any case, this is not a behavior change, just silencing
-            // the below warning
-            break;
         default:
             if (battle_config.error_log)
                 PRINTF("get area char ??? %d\n"_fmt,
@@ -3769,7 +3761,6 @@ RecvResult clif_parse_GetCharNameRequest(Session *s, dumb_ptr<map_session_data> 
             send_fpacket<0x0095, 30>(s, fixed_95);
         }
             break;
-        // case BL::SPELL
         default:
             if (battle_config.error_log)
                 PRINTF("clif_parse_GetCharNameRequest : bad type %d (%d)\n"_fmt,
@@ -3805,7 +3796,7 @@ RecvResult clif_parse_GlobalMessage(Session *s, dumb_ptr<map_session_data> sd)
     if (is_atcommand(s, sd, mbuf, GmLevel()))
         return rv;
 
-    if (!magic::magic_message(sd, mbuf))
+    if (!magic_message(sd, mbuf))
     {
         /* Don't send chat that results in an automatic ban. */
         if (tmw_CheckChatSpam(sd, mbuf))
@@ -4212,8 +4203,8 @@ RecvResult clif_parse_TakeItem(Session *s, dumb_ptr<map_session_data> sd)
         || abs(sd->bl_y - fitem->bl_y) >= 2)
         return rv;                 // too far away to pick up
 
-    if (sd->state.shroud_active && sd->state.shroud_disappears_on_pickup)
-        magic::magic_unshroud(sd);
+//    if (sd->state.shroud_active && sd->state.shroud_disappears_on_pickup)
+//        magic_unshroud(sd);
 
     pc_takeitem(sd, fitem);
 
