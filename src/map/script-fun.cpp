@@ -3469,7 +3469,17 @@ void builtin_get(ScriptState *st)
     }
     else
     {
-        int var = pc_readreg(bl, reg);
+        int var;
+        if (prefix == '#' && bl)
+        {
+            if (name_[1] == '#')
+                var = pc_readaccountreg2(bl->is_player(), stringish<VarName>(name_));
+            else
+                var = pc_readaccountreg(bl->is_player(), stringish<VarName>(name_));
+        }
+        else
+            var = pc_readreg(bl, reg);
+
         push_int<ScriptDataInt>(st->stack, var);
     }
 }
