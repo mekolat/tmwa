@@ -782,6 +782,96 @@ void builtin_input(ScriptState *st)
     }
 }
 
+static
+void builtin_requestitem(ScriptState *st)
+{
+    dumb_ptr<map_session_data> sd = nullptr;
+    script_data& scrd = AARG(0);
+    assert (scrd.is<ScriptDataVariable>());
+    int amount = HARG(1) ? conv_num(st, &AARG(1)) : 0;
+
+    SIR reg = scrd.get_if<ScriptDataVariable>()->reg;
+    ZString name = variable_names.outtern(reg.base());
+    char prefix = name.front();
+    char postfix = name.back();
+
+    if (prefix != '$' && prefix != '@' && prefix != '.')
+    {
+        PRINTF("builtin_requestitem: illegal scope!\n"_fmt);
+        runflag = 0;
+        return;
+    }
+
+    sd = script_rid2sd(st);
+    if (sd->state.menu_or_input)
+    {
+        // Second time (rerunline)
+        sd->state.menu_or_input = 0;
+        RString str = sd->npc_str;
+        RString val;
+        const char separator = ';';
+        for (int j = 0; j < 256; j++)
+        {
+            auto find = std::find(str.begin(), str.end(), separator);
+            if (find == str.end())
+                val = str.xislice_h(std::find(str.begin(), str.end(), ','));
+            else
+            {
+                val = str.xislice_h(find);
+                val = val.xislice_h(std::find(val.begin(), val.end(), ','));
+                str = str.xislice_t(find + 1);
+            }
+
+            // check that the item exists in the inventory
+            int num = atoi(val.c_str());
+            ItemNameId nameid = wrap<ItemNameId>(num);
+            for (IOff0 i : IOff0::iter())
+                if (sd->status.inventory[i].nameid == nameid)
+                    goto pass;
+        fail:
+            j--;
+            continue;
+
+        pass:
+            // push to array
+            if (postfix == '$')
+            {
+                Option<P<struct item_data>> i_data = Some(itemdb_search(nameid));
+                RString item_name = i_data.pmd_pget(&item_data::name).copy_or(stringish<ItemName>(""_s));
+                if (item_name == ""_s)
+                    goto fail;
+                if (prefix == '.' && name[1] == '@')
+                {
+                    struct script_data vd = script_data(ScriptDataStr{item_name});
+                    set_scope_reg(st, reg.iplus(j), &vd);
+                }
+                else
+                    set_reg(sd, VariableCode::VARIABLE, reg.iplus(j), item_name);
+            }
+            else
+            {
+                if (prefix == '.' && name[1] == '@')
+                {
+                    struct script_data vd = script_data(ScriptDataInt{num});
+                    set_scope_reg(st, reg.iplus(j), &vd);
+                }
+                else
+                    set_reg(sd, VariableCode::VARIABLE, reg.iplus(j), num);
+            }
+            if (find == str.end())
+                break;
+        }
+    }
+    else
+    {
+        // First time - send prompt to client, then wait
+        st->state = ScriptEndState::RERUNLINE;
+        clif_scriptinputstr(sd, st->oid); // send string prompt
+        clif_npc_action(sd, st->oid, 10, amount, 0, 0); // send item request
+        sd->state.menu_or_input = 1;
+    }
+}
+
 /*==========================================
  *
  *------------------------------------------
@@ -4307,6 +4397,7 @@ BuiltinFunction builtin_functions[] =
     BUILTIN(eltlvl, "i"_s, 'i'),
     BUILTIN(injure, "iii"_s, '\0'),
     BUILTIN(input, "N"_s, '\0'),
+    BUILTIN(requestitem, "N?"_s, '\0'),
     BUILTIN(if, "iF*"_s, '\0'),
     BUILTIN(elif, "iF*"_s, '\0'),
     BUILTIN(else, "F*"_s, '\0'),
