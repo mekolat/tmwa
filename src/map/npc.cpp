@@ -647,7 +647,7 @@ int npc_event(dumb_ptr<map_session_data> sd, NpcEvent eventname,
  */
 int npc_touch_areanpc(dumb_ptr<map_session_data> sd, Borrowed<map_local> m, int x, int y)
 {
-    int i, f = 1;
+    int i;
     int xs, ys;
 
     nullpo_retr(1, sd);
@@ -658,10 +658,7 @@ int npc_touch_areanpc(dumb_ptr<map_session_data> sd, Borrowed<map_local> m, int 
     for (i = 0; i < m->npc_num; i++)
     {
         if (m->npc[i]->flag & 1)
-        {                       // 無効化されている
-            f = 0;
             continue;
-        }
 
         switch (m->npc[i]->npc_subtype)
         {
@@ -684,11 +681,6 @@ int npc_touch_areanpc(dumb_ptr<map_session_data> sd, Borrowed<map_local> m, int 
     }
     if (i == m->npc_num)
     {
-        if (f)
-        {
-            if (battle_config.error_log)
-                PRINTF("npc_touch_areanpc : some bug \n"_fmt);
-        }
         return 1;
     }
     switch (m->npc[i]->npc_subtype)

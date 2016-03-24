@@ -2537,7 +2537,9 @@ int clif_damage(dumb_ptr<block_list> src, dumb_ptr<block_list> dst,
     nullpo_retz(src);
     nullpo_retz(dst);
 
-    sc_data = battle_get_sc_data(dst);
+    int target_hp = battle_get_hp(dst);
+    if (target_hp < damage)
+        damage = target_hp; // limit damage to hp
 
     Packet_Fixed<0x008a> fixed_8a;
     fixed_8a.src_id = src->bl_id;

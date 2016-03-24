@@ -1091,6 +1091,9 @@ int pc_calcstatus(dumb_ptr<map_session_data> sd, int first)
 
     sd->paramcard = sd->parame;
 
+    for (ATTR attr : ATTRs)
+        sd->paramc[attr] = std::max(0, sd->status.attrs[attr] + sd->paramb[attr] + sd->parame[attr]);
+
     // 装備品によるステータス変化はここで実行
     for (EQUIP i : EQUIPs_noarrow)
     {
@@ -1190,9 +1193,6 @@ int pc_calcstatus(dumb_ptr<map_session_data> sd, int first)
     sd->aspd_rate -= skill_power(sd, SkillID::TMW_SPEED) / 10;
     if (sd->aspd_rate < 20)
         sd->aspd_rate = 20;
-
-    for (ATTR attr : ATTRs)
-        sd->paramc[attr] = std::max(0, sd->status.attrs[attr] + sd->paramb[attr] + sd->parame[attr]);
 
     if (sd->status.weapon == ItemLook::BOW)
     {
