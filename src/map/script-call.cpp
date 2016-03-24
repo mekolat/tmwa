@@ -908,7 +908,6 @@ void run_script_main(ScriptState *st, Borrowed<const ScriptBuffer> rootscript)
     if (st->state != ScriptEndState::END)
     {
         // 再開するためにスタック情報を保存
-        dumb_ptr<map_session_data> sd = map_id2sd(st->rid);
         if (sd)
         {
             sd->npc_stackbuf = stack->stack_datav;

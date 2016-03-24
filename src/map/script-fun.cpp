@@ -2673,8 +2673,7 @@ void builtin_camera(ScriptState *st)
         {
             dumb_ptr<block_list> bl;
             short x = 0, y = 0;
-            int id;
-            bool rel;
+            bool rel = false;
             if (auto *u = AARG(0).get_if<ScriptDataInt>())
                 bl = map_id2bl(wrap<BlockId>(u->numi));
             if (auto *g = AARG(0).get_if<ScriptDataStr>())
