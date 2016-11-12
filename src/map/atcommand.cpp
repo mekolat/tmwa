@@ -2248,46 +2248,6 @@ ATCE atcommand_character_stats_all(Session *s, dumb_ptr<map_session_data>,
 }
 
 static
-ATCE atcommand_character_option(Session *s, dumb_ptr<map_session_data> sd,
-        ZString message)
-{
-    Opt1 opt1;
-    Opt2 opt2;
-    Opt0 opt3;
-    CharName character;
-    if (!asplit(message, &opt1, &opt2, &opt3, &character))
-        return ATCE::USAGE;
-
-    dumb_ptr<map_session_data> pl_sd = map_nick2sd(character);
-    if (pl_sd != nullptr)
-    {
-        if (pc_isGM(sd).overwhelms(pc_isGM(pl_sd)))
-        {
-            // you can change option only to lower or same level
-            pl_sd->opt1 = opt1;
-            pl_sd->opt2 = opt2;
-            pl_sd->status.option = opt3;
-
-            clif_changeoption(pl_sd);
-            pc_calcstatus(pl_sd, 0);
-            clif_displaymessage(s, "Character's options changed."_s);
-        }
-        else
-        {
-            clif_displaymessage(s, "Your GM level don't authorise you to do this action on this player."_s);
-            return ATCE::PERM;
-        }
-    }
-    else
-    {
-        clif_displaymessage(s, "Character not found."_s);
-        return ATCE::EXIST;
-    }
-
-    return ATCE::OKAY;
-}
-
-static
 ATCE atcommand_char_change_sex(Session *s, dumb_ptr<map_session_data> sd,
         ZString message)
 {
@@ -5075,9 +5035,6 @@ Map<XString, AtCommandInfo> atcommand_info =
     {"charstatsall"_s, {""_s,
         60, atcommand_character_stats_all,
         "Show a bunch of stats about all online users"_s}},
-    {"charoption"_s, {"<opt1> <opt2> <opt3> <charname>"_s,
-        80, atcommand_character_option,
-        "Set option flags on another character"_s}},
     {"charsave"_s, {"<map> <x> <y> <charname>"_s,
         60, atcommand_character_save,
         "Set another character's save point"_s}},
