@@ -468,42 +468,6 @@ ATCE atcommand_help(Session *s, dumb_ptr<map_session_data>,
     return ATCE::OKAY;
 }
 
-static
-ATCE atcommand_setup(Session *s, dumb_ptr<map_session_data> sd,
-        ZString message)
-{
-    int level = 1;
-    CharName character;
-
-    if (!asplit(message, &level, &character))
-        return ATCE::USAGE;
-    level--;
-
-    AString buf;
-    buf = STRPRINTF("-255 %s"_fmt, character);
-    atcommand_character_baselevel(s, sd, buf);
-
-    buf = STRPRINTF("%d %s"_fmt, level, character);
-    atcommand_character_baselevel(s, sd, buf);
-
-    // Emote skill
-    buf = STRPRINTF("1 1 %s"_fmt, character);
-    atcommand_skill_learn(s, sd, buf);
-
-    // Trade skill
-    buf = STRPRINTF("2 1 %s"_fmt, character);
-    atcommand_skill_learn(s, sd, buf);
-
-    // Party skill
-    STRPRINTF("2 2 %s"_fmt, character);
-    atcommand_skill_learn(s, sd, buf);
-
-    STRPRINTF("018-1.gat 24 98 %s"_fmt, character);
-    atcommand_charwarp(s, sd, buf);
-
-    return ATCE::OKAY;
-}
-
 //static
 ATCE atcommand_charwarp(Session *s, dumb_ptr<map_session_data> sd,
         ZString message)
@@ -4986,9 +4950,6 @@ Map<XString, AtCommandInfo> atcommand_info =
     {"help"_s, {"[level[-level]|category|@command]"_s,
         0, atcommand_help,
         "Show help"_s}},
-    {"setup"_s, {"<level> <charname>"_s,
-        40, atcommand_setup,
-        "Safely set a chars levels and warp them to a special place (for TAW)"_s}},
     {"charwarp"_s, {"<mapname> <x> <y> <charname>"_s,
         60, atcommand_charwarp,
         "Warp a character to a point on another map"_s}},
