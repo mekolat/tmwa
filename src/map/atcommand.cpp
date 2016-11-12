@@ -1182,28 +1182,6 @@ ATCE atcommand_storage(Session *s, dumb_ptr<map_session_data> sd,
 }
 
 static
-ATCE atcommand_option(Session *s, dumb_ptr<map_session_data> sd,
-        ZString message)
-{
-    Opt1 param1 = Opt1::ZERO;
-    Opt2 param2 = Opt2::ZERO;
-    Opt0 param3 = Opt0::ZERO;
-
-    if (!extract(message, record<',', 1>(&param1, &param2, &param3)))
-        return ATCE::USAGE;
-
-    sd->opt1 = param1;
-    sd->opt2 = param2;
-    sd->status.option = param3;
-
-    clif_changeoption(sd);
-    pc_calcstatus(sd, 0);
-    clif_displaymessage(s, "Options changed."_s);
-
-    return ATCE::OKAY;
-}
-
-static
 ATCE atcommand_hide(Session *s, dumb_ptr<map_session_data> sd,
         ZString)
 {
@@ -4998,9 +4976,6 @@ Map<XString, AtCommandInfo> atcommand_info =
     {"storage"_s, {""_s,
         99, atcommand_storage,
         "Open your storage"_s}},
-    {"option"_s, {"<opt1> [opt2] [option]"_s,
-        80, atcommand_option,
-        "Set your 'option' status flags"_s}},
     {"hide"_s, {""_s,
         40, atcommand_hide,
         "Toggle invisibility from monsters and certain commands"_s}},
